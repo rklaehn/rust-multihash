@@ -1,110 +1,263 @@
-/// List of types currently supported in the multihash spec.
-///
-/// Not all hash types are supported by this library.
-#[derive(PartialEq, Eq, Clone, Debug, Copy, Hash)]
-pub enum Hash {
+use blake2b_simd::Params as Blake2b;
+use blake2s_simd::Params as Blake2s;
+use digest::Digest;
+use enum_primitive_derive::Primitive;
+use sha1::Sha1 as Sha1Hasher;
+use sha2::{Sha256, Sha512};
+use tiny_keccak::{Hasher, Keccak, Sha3};
+
+use crate::digests::{wrap, Multihash, MultihashDigest};
+
+#[derive(Clone, Debug, PartialEq, Primitive)]
+pub enum Code {
     /// Identity (Raw binary )
-    Identity,
+    Identity = 0x00,
     /// SHA-1 (20-byte hash size)
-    SHA1,
+    Sha1 = 0x11,
     /// SHA-256 (32-byte hash size)
-    SHA2256,
+    Sha2_256 = 0x12,
     /// SHA-512 (64-byte hash size)
-    SHA2512,
-    /// SHA3-512 (64-byte hash size)
-    SHA3512,
-    /// SHA3-384 (48-byte hash size)
-    SHA3384,
-    /// SHA3-256 (32-byte hash size)
-    SHA3256,
+    Sha2_512 = 0x13,
     /// SHA3-224 (28-byte hash size)
-    SHA3224,
+    Sha3_224 = 0x17,
+    /// SHA3-256 (32-byte hash size)
+    Sha3_256 = 0x16,
+    /// SHA3-384 (48-byte hash size)
+    Sha3_384 = 0x15,
+    /// SHA3-512 (64-byte hash size)
+    Sha3_512 = 0x14,
     /// Keccak-224 (28-byte hash size)
-    Keccak224,
+    Keccak224 = 0x1a,
     /// Keccak-256 (32-byte hash size)
-    Keccak256,
+    Keccak256 = 0x1b,
     /// Keccak-384 (48-byte hash size)
-    Keccak384,
+    Keccak384 = 0x1c,
     /// Keccak-512 (64-byte hash size)
-    Keccak512,
+    Keccak512 = 0x1d,
     /// BLAKE2b-256 (32-byte hash size)
-    Blake2b256,
+    Blake2b256 = 0xb220,
     /// BLAKE2b-512 (64-byte hash size)
-    Blake2b512,
+    Blake2b512 = 0xb240,
     /// BLAKE2s-128 (16-byte hash size)
-    Blake2s128,
+    Blake2s128 = 0xb250,
     /// BLAKE2s-256 (32-byte hash size)
-    Blake2s256,
+    Blake2s256 = 0xb260,
 }
 
-impl Hash {
-    /// Get the corresponding hash code.
-    pub fn code(self) -> u16 {
-        match self {
-            Hash::Identity => 0x00,
-            Hash::SHA1 => 0x11,
-            Hash::SHA2256 => 0x12,
-            Hash::SHA2512 => 0x13,
-            Hash::SHA3224 => 0x17,
-            Hash::SHA3256 => 0x16,
-            Hash::SHA3384 => 0x15,
-            Hash::SHA3512 => 0x14,
-            Hash::Keccak224 => 0x1A,
-            Hash::Keccak256 => 0x1B,
-            Hash::Keccak384 => 0x1C,
-            Hash::Keccak512 => 0x1D,
-            Hash::Blake2b256 => 0xB220,
-            Hash::Blake2b512 => 0xB240,
-            Hash::Blake2s128 => 0xB250,
-            Hash::Blake2s256 => 0xB260,
-        }
-    }
+#[derive(Clone, Debug)]
+pub struct Identity;
+impl MultihashDigest for Identity {
+    const CODE: u64 = Code::Identity as _;
 
-    /// Get the hash length in bytes.
-    pub fn size(self) -> u8 {
-        match self {
-            // TODO vmx 2020-01-27: Identity doesn't have a fixed length. The `size()` API should
-            // be removed or renamed to `max_size()` as you can also store truncated hashes with a
-            // different size.
-            Hash::Identity => 42,
-            Hash::SHA1 => 20,
-            Hash::SHA2256 => 32,
-            Hash::SHA2512 => 64,
-            Hash::SHA3224 => 28,
-            Hash::SHA3256 => 32,
-            Hash::SHA3384 => 48,
-            Hash::SHA3512 => 64,
-            Hash::Keccak224 => 28,
-            Hash::Keccak256 => 32,
-            Hash::Keccak384 => 48,
-            Hash::Keccak512 => 64,
-            Hash::Blake2b256 => 32,
-            Hash::Blake2b512 => 64,
-            Hash::Blake2s128 => 16,
-            Hash::Blake2s256 => 32,
+    fn digest(data: &[u8]) -> Multihash {
+        if (data.len() as u64) >= u64::from(std::u32::MAX) {
+            panic!("Input data for identity hash is too large, it needs to be less the 2^32.")
         }
+        wrap(Self::CODE, &data)
     }
+}
 
-    /// Returns the algorithm corresponding to a code, or `None` if no algorithm is matching.
-    pub fn from_code(code: u16) -> Option<Hash> {
-        Some(match code {
-            0x00 => Hash::Identity,
-            0x11 => Hash::SHA1,
-            0x12 => Hash::SHA2256,
-            0x13 => Hash::SHA2512,
-            0x14 => Hash::SHA3512,
-            0x15 => Hash::SHA3384,
-            0x16 => Hash::SHA3256,
-            0x17 => Hash::SHA3224,
-            0x1A => Hash::Keccak224,
-            0x1B => Hash::Keccak256,
-            0x1C => Hash::Keccak384,
-            0x1D => Hash::Keccak512,
-            0xB220 => Hash::Blake2b256,
-            0xB240 => Hash::Blake2b512,
-            0xB250 => Hash::Blake2s128,
-            0xB260 => Hash::Blake2s256,
-            _ => return None,
-        })
+#[derive(Clone, Debug)]
+pub struct Sha1;
+impl MultihashDigest for Sha1 {
+    const CODE: u64 = Code::Sha1 as _;
+
+    fn digest(data: &[u8]) -> Multihash {
+        let digest = Sha1Hasher::from(&data).digest().bytes();
+        wrap(Self::CODE, &digest)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct Sha2_256;
+impl MultihashDigest for Sha2_256 {
+    const CODE: u64 = Code::Sha2_256 as _;
+
+    fn digest(data: &[u8]) -> Multihash {
+        let digest = Sha256::digest(&data);
+        wrap(Self::CODE, &digest)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct Sha2_512;
+impl MultihashDigest for Sha2_512 {
+    const CODE: u64 = Code::Sha2_512 as _;
+
+    fn digest(data: &[u8]) -> Multihash {
+        let digest = Sha512::digest(&data);
+        wrap(Self::CODE, &digest)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct Sha3_224;
+impl MultihashDigest for Sha3_224 {
+    const CODE: u64 = Code::Sha3_224 as _;
+
+    fn digest(data: &[u8]) -> Multihash {
+        let mut digest = [0; 28];
+        let mut sha3 = Sha3::v224();
+        sha3.update(&data);
+        sha3.finalize(&mut digest);
+        wrap(Self::CODE, &digest)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct Sha3_256;
+impl MultihashDigest for Sha3_256 {
+    const CODE: u64 = Code::Sha3_256 as _;
+
+    fn digest(data: &[u8]) -> Multihash {
+        let mut digest = [0; 32];
+        let mut sha3 = Sha3::v256();
+        sha3.update(&data);
+        sha3.finalize(&mut digest);
+        wrap(Self::CODE, &digest)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct Sha3_384;
+impl MultihashDigest for Sha3_384 {
+    const CODE: u64 = Code::Sha3_384 as _;
+
+    fn digest(data: &[u8]) -> Multihash {
+        let mut digest = [0; 48];
+        let mut sha3 = Sha3::v384();
+        sha3.update(&data);
+        sha3.finalize(&mut digest);
+        wrap(Self::CODE, &digest)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct Sha3_512;
+impl MultihashDigest for Sha3_512 {
+    const CODE: u64 = Code::Sha3_512 as _;
+
+    fn digest(data: &[u8]) -> Multihash {
+        let mut digest = [0; 64];
+        let mut sha3 = Sha3::v512();
+        sha3.update(&data);
+        sha3.finalize(&mut digest);
+        wrap(Self::CODE, &digest)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct Keccak224;
+impl MultihashDigest for Keccak224 {
+    const CODE: u64 = Code::Keccak224 as _;
+
+    fn digest(data: &[u8]) -> Multihash {
+        let mut digest = [0; 28];
+        let mut keccak = Keccak::v224();
+        keccak.update(&data);
+        keccak.finalize(&mut digest);
+        wrap(Self::CODE, &digest)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct Keccak256;
+impl MultihashDigest for Keccak256 {
+    const CODE: u64 = Code::Keccak256 as _;
+
+    fn digest(data: &[u8]) -> Multihash {
+        let mut digest = [0; 32];
+        let mut keccak = Keccak::v256();
+        keccak.update(&data);
+        keccak.finalize(&mut digest);
+        wrap(Self::CODE, &digest)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct Keccak384;
+impl MultihashDigest for Keccak384 {
+    const CODE: u64 = Code::Keccak384 as _;
+
+    fn digest(data: &[u8]) -> Multihash {
+        let mut digest = [0; 48];
+        let mut keccak = Keccak::v384();
+        keccak.update(&data);
+        keccak.finalize(&mut digest);
+        wrap(Self::CODE, &digest)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct Keccak512;
+impl MultihashDigest for Keccak512 {
+    const CODE: u64 = Code::Keccak512 as _;
+
+    fn digest(data: &[u8]) -> Multihash {
+        let mut digest = [0; 64];
+        let mut keccak = Keccak::v512();
+        keccak.update(&data);
+        keccak.finalize(&mut digest);
+        wrap(Self::CODE, &digest)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct Blake2b256;
+impl MultihashDigest for Blake2b256 {
+    const CODE: u64 = Code::Blake2b256 as _;
+
+    fn digest(data: &[u8]) -> Multihash {
+        let digest = Blake2b::new()
+            .hash_length(32)
+            .to_state()
+            .update(&data)
+            .finalize();
+        wrap(Self::CODE, &digest.as_bytes())
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct Blake2b512;
+impl MultihashDigest for Blake2b512 {
+    const CODE: u64 = Code::Blake2b512 as _;
+
+    fn digest(data: &[u8]) -> Multihash {
+        let digest = Blake2b::new()
+            .hash_length(64)
+            .to_state()
+            .update(&data)
+            .finalize();
+        wrap(Self::CODE, &digest.as_bytes())
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct Blake2s128;
+impl MultihashDigest for Blake2s128 {
+    const CODE: u64 = Code::Blake2s128 as _;
+
+    fn digest(data: &[u8]) -> Multihash {
+        let digest = Blake2s::new()
+            .hash_length(16)
+            .to_state()
+            .update(&data)
+            .finalize();
+        wrap(Self::CODE, &digest.as_bytes())
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct Blake2s256;
+impl MultihashDigest for Blake2s256 {
+    const CODE: u64 = Code::Blake2s256 as _;
+
+    fn digest(data: &[u8]) -> Multihash {
+        let digest = Blake2s::new()
+            .hash_length(32)
+            .to_state()
+            .update(&data)
+            .finalize();
+        wrap(Self::CODE, &digest.as_bytes())
     }
 }
