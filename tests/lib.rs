@@ -1,5 +1,3 @@
-use num_traits::cast::FromPrimitive;
-
 use multihash::*;
 
 /// Helper function to convert a hex-encoded byte array back into a bytearray
@@ -28,6 +26,8 @@ macro_rules! assert_encode {
 #[test]
 fn multihash_encode() {
     assert_encode! {
+        // A hash with a length bigger than 0x80, hence needing 2 bytes to encode the length
+        Identity, b"abcdefghijklmnopqrstuvwxyz abcdefghijklmnopqrstuvwxyz abcdefghijklmnopqrstuvwxyz abcdefghijklmnopqrstuvwxyz abcdefghijklmnopqrstuvwxyz abcdefghijklmnopqrstuvwxyz", "00a1016162636465666768696a6b6c6d6e6f707172737475767778797a206162636465666768696a6b6c6d6e6f707172737475767778797a206162636465666768696a6b6c6d6e6f707172737475767778797a206162636465666768696a6b6c6d6e6f707172737475767778797a206162636465666768696a6b6c6d6e6f707172737475767778797a206162636465666768696a6b6c6d6e6f707172737475767778797a";
         Identity, b"beep boop", "00096265657020626f6f70";
         Sha1, b"beep boop", "11147c8357577f51d4f0a8d393aa1aaafb28863d9421";
         Sha2_256, b"helloworld", "1220936a185caaa266bb9cbe981e9e05cb78cd732b0b3280eb944412bb6f8f8f07af";
@@ -54,7 +54,7 @@ macro_rules! assert_decode {
             let hash = hex_to_bytes($hash);
             assert_eq!(
                 MultihashRef::from_slice(&hash).unwrap().algorithm(),
-                Code::from_u64($alg::CODE).unwrap(),
+                $alg::CODE,
                 "{:?} decodes correctly", $alg
             );
         )*
@@ -91,7 +91,7 @@ macro_rules! assert_roundtrip {
                 let hash: Vec<u8> = <$alg as MultihashDigest>::digest(b"helloworld").into_bytes();
                 assert_eq!(
                     MultihashRef::from_slice(&hash).unwrap().algorithm(),
-                    Code::from_u64($alg::CODE).unwrap()
+                    $alg::CODE
                 );
             }
         )*
@@ -115,7 +115,7 @@ fn test_methods(hash: impl DynMultihashDigest, prefix: &str, digest: &str) {
         multihash
     );
     assert_eq!(multihash.as_bytes(), &expected_bytes[..]);
-    assert_eq!(multihash.algorithm(), Code::from_u64(hash.code()).unwrap());
+    assert_eq!(multihash.algorithm(), hash.code());
     assert_eq!(multihash.digest(), &hex_to_bytes(digest)[..]);
 
     let multihash_ref = multihash.as_ref();
@@ -201,6 +201,29 @@ fn multihash_methods() {
 }
 
 #[test]
+fn test_long_identity_hash() {
+    // A hash with a length bigger than 0x80, hence needing 2 bytes to encode the length
+    let input = b"abcdefghijklmnopqrstuvwxyz abcdefghijklmnopqrstuvwxyz abcdefghijklmnopqrstuvwxyz abcdefghijklmnopqrstuvwxyz abcdefghijklmnopqrstuvwxyz abcdefghijklmnopqrstuvwxyz";
+    let multihash = <Identity as MultihashDigest>::digest(input);
+    assert_eq!(multihash.digest().to_vec(), input.to_vec());
+}
+
+#[test]
+fn custom_multihash() {
+    let code = Code::Custom(0x1234);
+    let data = b"abcde".to_vec();
+    let multihash = wrap(&code, &data);
+
+    assert_eq!(
+        multihash.as_bytes(),
+        &[0xb4, 0x24, 0x05, 0x61, 0x62, 0x63, 0x64, 0x65]
+    );
+    assert_eq!(multihash.algorithm(), code);
+    assert_eq!(multihash.algorithm().to_u64(), 0x1234);
+    assert_eq!(multihash.digest(), b"abcde");
+}
+
+#[test]
 fn multihash_errors() {
     assert!(
         Multihash::from_bytes(Vec::new()).is_err(),
@@ -218,7 +241,7 @@ fn multihash_errors() {
         Multihash::from_bytes(vec![0x12, 0x20, 0xff]).is_err(),
         "Should error on correct prefix with wrong digest"
     );
-    let identity_code = Identity::CODE as u8;
+    let identity_code = Identity::CODE.to_u64() as u8;
     let identity_length = 3;
     assert!(
         Multihash::from_bytes(vec![identity_code, identity_length, 1, 2, 3, 4]).is_err(),
@@ -244,7 +267,7 @@ fn multihash_ref_errors() {
         MultihashRef::from_slice(&[0x12, 0x20, 0xff]).is_err(),
         "Should error on correct prefix with wrong digest"
     );
-    let identity_code = Identity::CODE as u8;
+    let identity_code = Identity::CODE.to_u64() as u8;
     let identity_length = 3;
     assert!(
         MultihashRef::from_slice(&[identity_code, identity_length, 1, 2, 3, 4]).is_err(),

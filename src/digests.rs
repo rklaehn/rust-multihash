@@ -9,7 +9,6 @@
 use std::convert::TryFrom;
 
 use bytes::{BufMut, Bytes, BytesMut};
-use num_traits::cast::FromPrimitive;
 use unsigned_varint::{decode as varint_decode, encode as varint_encode};
 
 use crate::errors::{DecodeError, DecodeOwnedError};
@@ -112,18 +111,18 @@ impl<'a> MultihashRef<'a> {
 
     /// Returns which hashing algorithm is used in this multihash.
     pub fn algorithm(&self) -> Code {
-        let code = varint_decode::u64(&self.bytes)
-            .expect("multihash is known to be valid algorithm")
-            .0;
-        Code::from_u64(code).expect("multihash is known to be valid")
+        let (code, _bytes) =
+            varint_decode::u64(&self.bytes).expect("multihash is known to be valid algorithm");
+        Code::from_u64(code)
     }
 
     /// Returns the hashed data.
     pub fn digest(&self) -> &'a [u8] {
-        let bytes = varint_decode::u16(&self.bytes)
-            .expect("multihash is known to be valid digest")
-            .1;
-        &bytes[1..]
+        let (_code, bytes) =
+            varint_decode::u64(&self.bytes).expect("multihash is known to be valid digest");
+        let (_hash_len, bytes) =
+            varint_decode::u64(&bytes).expect("multihash is known to be a valid digest");
+        &bytes[..]
     }
 
     /// Builds a `Multihash` that owns the data.
@@ -150,7 +149,7 @@ impl<'a> PartialEq<Multihash> for MultihashRef<'a> {
 /// The `MultihashDigest` trait specifies an interface common for all multihash functions.
 pub trait MultihashDigest {
     /// The Mutlihash byte value.
-    const CODE: u64;
+    const CODE: Code;
 
     /// Hash some input and return the digest.
     ///
@@ -168,7 +167,7 @@ pub trait MultihashDigest {
 /// object.
 pub trait DynMultihashDigest {
     /// The Mutlihash byte value.
-    fn code(&self) -> u64;
+    fn code(&self) -> Code;
 
     /// Hash some input and return the digest.
     ///
@@ -179,7 +178,7 @@ pub trait DynMultihashDigest {
 }
 
 impl<T: MultihashDigest + ?Sized> DynMultihashDigest for T {
-    fn code(&self) -> u64 {
+    fn code(&self) -> Code {
         Self::CODE
     }
     fn digest(&self, data: &[u8]) -> Multihash {
@@ -191,9 +190,9 @@ impl<T: MultihashDigest + ?Sized> DynMultihashDigest for T {
 ///
 /// The size of the hash is determoned by the size of the input hash. If it should be truncated
 /// the input data must already be the truncated hash.
-pub fn wrap(code: u64, data: &[u8]) -> Multihash {
+pub fn wrap(code: &Code, data: &[u8]) -> Multihash {
     let mut code_buf = varint_encode::u64_buffer();
-    let code_varint = varint_encode::u64(code, &mut code_buf);
+    let code_varint = varint_encode::u64(code.to_u64(), &mut code_buf);
 
     let mut size_buf = varint_encode::u64_buffer();
     let size_varint = varint_encode::u64(data.len() as u64, &mut size_buf);
